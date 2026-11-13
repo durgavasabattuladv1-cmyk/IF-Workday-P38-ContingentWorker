@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xmlns:file="http://www.mulesoft.org/schema/mule/file"
+      xmlns:jms="http://www.mulesoft.org/schema/mule/jms"
+      xmlns:db="http://www.mulesoft.org/schema/mule/db"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:validation="http://www.mulesoft.org/schema/mule/validation"
+      xsi:schemaLocation="
+        http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+        http://www.mulesoft.org/schema/mule/file http://www.mulesoft.org/schema/mule/file/current/mule-file.xsd
+        http://www.mulesoft.org/schema/mule/jms http://www.mulesoft.org/schema/mule/jms/current/mule-jms.xsd
+        http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+        http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+        http://www.mulesoft.org/schema/mule/validation http://www.mulesoft.org/schema/mule/validation/current/mule-validation.xsd">
+
+    <configuration-properties file="application.properties"/>
+
+    <file:config name="Workday_File_Config">
+        <file:connection workingDir="${workday.inbound.directory}"/>
+    </file:config>
+    <file:config name="P38_File_Config">
+        <file:connection workingDir="${p38.contingent-worker.output.directory}"/>
+    </file:config>
+    <jms:config name="JMS_Config">
+        <jms:connection>
+            <jms:active-mq-connection brokerUrl="${jms.broker.url}" username="${jms.username}" password="${jms.password}" clientId="${jms.client.id}"/>
+        </jms:connection>
+    </jms:config>
+    <db:config name="Hub_Database_Config">
+        <db:generic-connection url="${hub.db.url}" user="${hub.db.user}" password="${hub.db.password}" driverClassName="${hub.db.driver}"/>
+    </db:config>
+
+    <error-handler name="Common_Error_Handler">
+        <on-error-continue type="ANY" logException="true">
+            <logger level="ERROR" message="#['Workday/P38 Contingent Worker failure: ' ++ (error.description default error.errorType.identifier)]"/>
+            <set-payload value="#['{&quot;errorType&quot;:&quot;' ++ error.errorType.identifier ++ '&quot;,&quot;description&quot;:&quot;' ++ (error.description default '') ++ '&quot;}']" mimeType="application/json"/>
+            <jms:publish config-ref="JMS_Config" destination="${jms.topic.error}" destinationType="TOPIC"/>
+        </on-error-continue>
+    </error-handler>
+
+    <!-- TIBCO FileSequencer + queueFiles for the PQ_CW file type. -->
+    <flow name="workday-contingent-worker-file-ingress-flow" error-handler-ref="Common_Error_Handler">
+        <file:listener config-ref="Workday_File_Config" directory="${workday.inbound.directory}">
+            <scheduling-strategy><fixed-frequency frequency="${workday.polling.frequency}"/></scheduling-strategy>
+            <file:matcher filenamePattern="PQ_CW*.xml"/>
+        </file:listener>
+        <set-variable variableName="sourceFilePath" value="#[(attributes.path as String)]"/>
+        <set-variable variableName="sourceFileName" value="#[(attributes.fileName as String)]"/>
+        <set-variable variableName="workingFilePath" value="#['${workday.working.directory}/' ++ vars.sourceFileName]"/>
+        <file:move config-ref="Workday_File_Config" sourcePath="#[vars.sourceFilePath]" targetPath="#[vars.workingFilePath]"/>
+        <set-payload value="#[{fullName: vars.workingFilePath, object: 'ContingentWorker'}]" mimeType="application/json"/>
+        <jms:publish config-ref="JMS_Config" destination="${jms.queue.file-sequencer}" properties="#[{originalFileName: vars.sourceFileName, workingFilePath: vars.workingFilePath, ae_tracking: correlationId}]"/>
+    </flow>
+
+    <!-- TIBCO JmsFilePoller.process.  JMS acknowledgement occurs only after this flow completes. -->
+    <flow name="workday-contingent-worker-normal-file-poller-flow" error-handler-ref="Common_Error_Handler">
+        <jms:listener config-ref="JMS_Config" destination="${jms.queue.file-sequencer}"/>
+        <set-variable variableName="originalFileName" value="#[(attributes.properties.originalFileName default 'unknown.xml') as String]"/>
+        <set-variable variableName="workingFilePath" value="#[(attributes.properties.workingFilePath default null) as String]"/>
+        <validation:is-true expression="#[vars.workingFilePath != null]" message="Missing workingFilePath on FileSequencer queue message"/>
+        <file:read config-ref="Workday_File_Config" path="#[vars.workingFilePath]"/>
+        <jms:publish config-ref="JMS_Config" destination="${jms.topic.amm-src}" destinationType="TOPIC" properties="#[{originalFileName: vars.originalFileName, ae_tracking: attributes.properties.ae_tracking default correlationId}]"/>
+        <file:move config-ref="Workday_File_Config" sourcePath="#[vars.workingFilePath]" targetPath="#['${workday.processed.directory}/' ++ vars.originalFileName ++ '-' ++ (now() as String {format: 'yyyyMMddHHmmssSSS'})]"/>
+    </flow>
+
+    <!-- TIBCO JmsPriorityFilePoller.process.  This route is retained although PQ_CW is not priority-configured in the supplied file configuration. -->
+    <flow name="workday-contingent-worker-priority-file-poller-flow" error-handler-ref="Common_Error_Handler">
+        <jms:listener config-ref="JMS_Config" destination="${jms.queue.priority-file-sequencer}"/>
+        <set-variable variableName="originalFileName" value="#[(attributes.properties.originalFileName default 'unknown.xml') as String]"/>
+        <set-variable variableName="workingFilePath" value="#[(attributes.properties.workingFilePath default null) as String]"/>
+        <validation:is-true expression="#[vars.workingFilePath != null]" message="Missing workingFilePath on priority FileSequencer queue message"/>
+        <file:read config-ref="Workday_File_Config" path="#[vars.workingFilePath]"/>
+        <jms:publish config-ref="JMS_Config" destination="${jms.topic.amm-src}" destinationType="TOPIC" properties="#[{originalFileName: vars.originalFileName, ae_tracking: attributes.properties.ae_tracking default correlationId}]"/>
+        <file:move config-ref="Workday_File_Config" sourcePath="#[vars.workingFilePath]" targetPath="#['${workday.processed.directory}/' ++ vars.originalFileName ++ '-' ++ (now() as String {format: 'yyyyMMddHHmmssSSS'})]"/>
+    </flow>
+
+    <!-- TIBCO ContingentWorker/processFile.process and mapper.process. -->
+    <flow name="workday-contingent-worker-amm-src-flow" error-handler-ref="Common_Error_Handler">
+        <jms:listener config-ref="JMS_Config" destination="${jms.topic.amm-src}" destinationType="TOPIC"/>
+        <set-variable variableName="originalFileName" value="#[(attributes.properties.originalFileName default ('DEFAULT_FILE_NAME_' ++ (now() as String {format: 'yyyyMMddHHmmssSSS'}) ++ '.xml')) as String]"/>
+        <set-variable variableName="adapterTrackingId" value="#[(attributes.properties.ae_tracking default correlationId) as String]"/>
+        <validation:validate-schema schemaUrl="classpath://schema/Workday_ContingentWorker.xsd"/>
+        <ee:transform doc:name="Parse Workday Contingent Worker XML">
+            <ee:message><ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+read(payload, "application/xml")]]></ee:set-payload></ee:message>
+        </ee:transform>
+        <validation:is-true expression="#[(payload.Contingent_Worker_Events.Worker default []) sizeOf > 0]" message="Unable to parse file from Workday because it contains no Contingent Worker data"/>
+        <ee:transform doc:name="Flatten Worker Events">
+            <ee:message><ee:set-payload resource="classpath://dwl/flatten-contingent-worker-events.dwl"/></ee:message>
+        </ee:transform>
+        <set-variable variableName="mappedEvents" value="#[]"/>
+        <foreach collection="#[payload]">
+            <choice>
+                <when expression="#[p('hub.disabled') != 'true']">
+                    <choice>
+                        <when expression="#[((payload.event.Position_Data.Cost_Center_ODG_Code default '') as String) matches /^[0-9]+$/]">
+                            <db:select config-ref="Hub_Database_Config" target="personnelRows"><db:sql><![CDATA[SELECT personnel_area AS PERSONNEL_AREA, personnel_sub_area AS PERSONNEL_SUB_AREA, location_name AS LOCATION_NAME FROM ${hub.location.mapping.table} WHERE UPPER(location_id) = UPPER(:locationId) AND UPPER(company_code) = UPPER(:companyCode) AND UPPER(odg_code) = UPPER(:costCenterOdg)]]></db:sql><db:input-parameters><![CDATA[#[{locationId: payload.event.Position_Data.Location_ID default null, companyCode: payload.event.Position_Data.Company_Code default null, costCenterOdg: payload.event.Position_Data.Cost_Center_ODG_Code default null}]]]></db:input-parameters></db:select>
+                        </when>
+                        <otherwise>
+                            <db:select config-ref="Hub_Database_Config" target="personnelRows"><db:sql><![CDATA[SELECT personnel_area AS PERSONNEL_AREA, personnel_sub_area AS PERSONNEL_SUB_AREA, location_name AS LOCATION_NAME FROM ${hub.location.mapping.table} WHERE UPPER(location_id) = UPPER(:locationId) AND UPPER(company_code) = UPPER(:companyCode) AND UPPER(odg_name) = UPPER(:costCenterOdg)]]></db:sql><db:input-parameters><![CDATA[#[{locationId: payload.event.Position_Data.Location_ID default null, companyCode: payload.event.Position_Data.Company_Code default null, costCenterOdg: payload.event.Position_Data.Cost_Center_ODG_Code default null}]]]></db:input-parameters></db:select>
+                        </otherwise>
+                    </choice>
+                    <db:select config-ref="Hub_Database_Config" target="cityRows"><db:sql><![CDATA[SELECT ZCITY_KEY FROM ${hub.location.mapping.table} WHERE LOCATION_ID = :locationId]]></db:sql><db:input-parameters><![CDATA[#[{locationId: payload.event.Position_Data.Location_ID default null}]]]></db:input-parameters></db:select>
+                </when>
+                <otherwise>
+                    <set-variable variableName="personnelRows" value="#[]"/>
+                    <set-variable variableName="cityRows" value="#[]"/>
+                </otherwise>
+            </choice>
+            <ee:transform doc:name="Map and Enrich Event"><ee:message><ee:set-payload resource="classpath://dwl/enrich-contingent-worker-event.dwl"/></ee:message></ee:transform>
+            <set-variable variableName="mappedEvents" value="#[vars.mappedEvents ++ [payload]]"/>
+        </foreach>
+        <ee:transform doc:name="Build Canonical Contingent Worker Events"><ee:message><ee:set-payload resource="classpath://dwl/build-contingent-worker-events.dwl"/></ee:message></ee:transform>
+        <ee:transform doc:name="Wrap CMM SOAP Envelope"><ee:message><ee:set-payload resource="classpath://dwl/wrap-canonical-envelope.dwl"/></ee:message></ee:transform>
+        <jms:publish config-ref="JMS_Config" destination="${jms.topic.cmm-src}" destinationType="TOPIC" properties="#[{originalFileName: vars.originalFileName, ae_tracking: vars.adapterTrackingId}]"/>
+    </flow>
+
+    <!-- TIBCO HRSystem Core EventHandler: CMM-SRC to CMM publication. -->
+    <flow name="hrsystem-core-contingent-worker-cmm-flow" error-handler-ref="Common_Error_Handler">
+        <jms:listener config-ref="JMS_Config" destination="${jms.topic.cmm-src}" destinationType="TOPIC"/>
+        <jms:publish config-ref="JMS_Config" destination="${jms.topic.cmm-pub}" destinationType="TOPIC" properties="#[attributes.properties]"/>
+    </flow>
+
+    <!-- TIBCO P38 MRP Core EventHandler: CMM publication to CMM-DST. -->
+    <flow name="p38-mrp-core-contingent-worker-cmm-flow" error-handler-ref="Common_Error_Handler">
+        <jms:listener config-ref="JMS_Config" destination="${jms.topic.cmm-pub}" destinationType="TOPIC"/>
+        <jms:publish config-ref="JMS_Config" destination="${jms.topic.cmm-dst}" destinationType="TOPIC" properties="#[attributes.properties]"/>
+    </flow>
+
+    <!-- TIBCO SAP SEAL EventHandler + _Main: CMM-DST to CHRIS file. -->
+    <flow name="p38-sap-contingent-worker-file-output-flow" error-handler-ref="Common_Error_Handler">
+        <jms:listener config-ref="JMS_Config" destination="${jms.topic.cmm-dst}" destinationType="TOPIC"/>
+        <set-variable variableName="outputFileName" value="#[(read(payload, 'application/xml').Envelope.Body.@originalFileName default attributes.properties.originalFileName default ('DEFAULT_FILE_NAME_' ++ (now() as String {format: 'yyyyMMddHHmmssSSS'}) ++ '.xml')) as String]"/>
+        <ee:transform doc:name="Extract Contingent Worker Events"><ee:message><ee:set-payload resource="classpath://dwl/extract-contingent-worker-body.dwl"/></ee:message></ee:transform>
+        <file:write config-ref="P38_File_Config" path="#[vars.outputFileName]" mode="OVERWRITE" outputMimeType="application/xml"/>
+    </flow>
+</mule>
