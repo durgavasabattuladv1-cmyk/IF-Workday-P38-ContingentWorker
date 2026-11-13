@@ -15,12 +15,12 @@ output application/java
 read(payload, "application/xml")]]></ee:set-payload></ee:message></ee:transform>
     <validation:is-true expression="#[(payload.Contingent_Worker_Events.Worker default []) sizeOf > 0]" message="Unable to parse file from Workday because it contains no Contingent Worker data"/>
     <ee:transform><ee:message><ee:set-payload resource="classpath://dwl/flatten-contingent-worker-events.dwl"/></ee:message></ee:transform>
-    <set-variable variableName="mappedEvents" value="#[]"/>
+    <set-variable variableName="mappedEvents" value="#[[]]"/>
     <foreach collection="#[payload]">
       <choice><when expression="#[p('hub.disabled') != 'true']">
         <http:request config-ref="System_API" method="POST" path="/api/v1/reference/personnel-area" target="personnelRows"><http:body>#[payload.event.Position_Data default {}]</http:body></http:request>
         <http:request config-ref="System_API" method="POST" path="/api/v1/reference/city-key" target="cityRows"><http:body>#[payload.event.Position_Data default {}]</http:body></http:request>
-      </when><otherwise><set-variable variableName="personnelRows" value="#[]"/><set-variable variableName="cityRows" value="#[]"/></otherwise></choice>
+      </when><otherwise><set-variable variableName="personnelRows" value="#[[]]"/><set-variable variableName="cityRows" value="#[[]]"/></otherwise></choice>
       <ee:transform><ee:message><ee:set-payload resource="classpath://dwl/enrich-contingent-worker-event.dwl"/></ee:message></ee:transform>
       <set-variable variableName="mappedEvents" value="#[vars.mappedEvents ++ [payload]]"/>
     </foreach>
