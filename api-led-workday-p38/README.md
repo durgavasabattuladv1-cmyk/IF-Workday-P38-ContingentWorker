@@ -4,11 +4,11 @@ This migration separates the requested TIBCO path into deployable Mule 4 APIs:
 
 | Layer | Mule application | Responsibility |
 | --- | --- | --- |
-| System API | `workday-contingent-worker-system-api` | File lifecycle and FileSequencer/JMS polling; invokes the Process API with the raw Workday XML. |
+| System API | `workday-contingent-worker-system-api` | File lifecycle and FileSequencer/VM polling; invokes the Process API with the raw Workday XML. |
 | Process API | `contingent-worker-process-api` | Validates, enriches and maps Workday Contingent Worker data into the canonical CMM SOAP envelope. |
 | System API | `p38-contingent-worker-system-api` | Owns HUB location lookups and creates the P38/CHRIS file. |
 
-The legacy publication names are retained as Mule flow names and trace points: `FileSequencer.AMM-SRC.ProcessFile`, `AMM-SRC`, `CMM-SRC`, `CMM`, and `CMM-DST`. HTTP is the API-to-API contract; JMS remains only inside the Workday System API for the two TIBCO file-poller queues.
+The legacy publication names are retained as Mule flow names and trace points: `FileSequencer.AMM-SRC.ProcessFile`, `AMM-SRC`, `CMM-SRC`, `CMM`, and `CMM-DST`. HTTP is the API-to-API contract; Mule VM queues are used inside the Workday System API for local file-poller testing.
 
 The two Core event-handler path names are retained as Process API subflows, while the P38 SAP SEAL event handler is the P38 System API file endpoint. This keeps the migration traceable without retaining cross-domain JMS as the API contract.
 
@@ -31,4 +31,4 @@ The two Core event-handler path names are retained as Process API subflows, whil
 
 All values are placeholders. Supply secure broker, database and endpoint configuration per environment. The Oracle JDBC driver is intentionally not bundled; use the approved enterprise repository/runtime configuration.
 
-The TIBCO-to-Mule analysis and behaviour rationale are in [the source-trace document](../docs/workday-contingent-worker-to-p38-understanding.md).
+The target API-led design is described in [the API-led understanding document](../docs/api-led-workday-contingent-worker-understanding.md). The detailed TIBCO source analysis and behaviour rationale are in [the source-trace document](../docs/workday-contingent-worker-to-p38-understanding.md).

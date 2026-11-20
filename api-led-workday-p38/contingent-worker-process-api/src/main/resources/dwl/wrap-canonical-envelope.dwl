@@ -15,7 +15,7 @@ soap#Envelope: {
             cmm#systemName: p('workday.system.id'),
             cmm#componentType: p('workday.component.type'),
             cmm#eventHandlerName: 'workday-contingent-worker-amm-src-flow',
-            cmm#topicOfIncomingMessage: p('jms.topic.amm-src')
+            cmm#topicOfIncomingMessage: p('workday.amm-src.publication')
           }
         }
       }

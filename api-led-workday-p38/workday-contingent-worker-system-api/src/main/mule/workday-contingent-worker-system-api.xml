@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<mule xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:file="http://www.mulesoft.org/schema/mule/file" xmlns:jms="http://www.mulesoft.org/schema/mule/jms" xmlns:http="http://www.mulesoft.org/schema/mule/http" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd http://www.mulesoft.org/schema/mule/file http://www.mulesoft.org/schema/mule/file/current/mule-file.xsd http://www.mulesoft.org/schema/mule/jms http://www.mulesoft.org/schema/mule/jms/current/mule-jms.xsd http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd">
+<mule xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:file="http://www.mulesoft.org/schema/mule/file" xmlns:vm="http://www.mulesoft.org/schema/mule/vm" xmlns:http="http://www.mulesoft.org/schema/mule/http" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd http://www.mulesoft.org/schema/mule/file http://www.mulesoft.org/schema/mule/file/current/mule-file.xsd http://www.mulesoft.org/schema/mule/vm http://www.mulesoft.org/schema/mule/vm/current/mule-vm.xsd http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd">
   <configuration-properties file="application.properties"/>
   <file:config name="Inbound_File"><file:connection workingDir="${workday.inbound.directory}"/></file:config>
   <file:config name="Working_File"><file:connection workingDir="${workday.working.directory}"/></file:config>
-  <jms:config name="JMS"><jms:connection><jms:active-mq-connection brokerUrl="${jms.broker.url}" username="${jms.username}" password="${jms.password}" clientId="${jms.client.id}"/></jms:connection></jms:config>
+  <vm:config name="VM_Config"/>
   <http:request-config name="Process_API"><http:request-connection host="${process.api.host}" port="${process.api.port}" protocol="HTTP"/></http:request-config>
 
   <flow name="HRSystemSealAndCores-Workday_root\SEAL\HRSystem\InterfaceImpl\_AllInstances\FromWorkday\_GenericFilePoller\FileSequencer.process">
@@ -13,12 +13,13 @@
     <flow-ref name="Roche.Pharma.CrossDomain.OP.Workday.FileSequencer.AMM-SRC.ProcessFile.Publication"/>
   </flow>
   <sub-flow name="Roche.Pharma.CrossDomain.OP.Workday.FileSequencer.AMM-SRC.ProcessFile.Publication">
-    <jms:publish config-ref="JMS" destination="${jms.queue.file-sequencer}" destinationType="QUEUE" properties="#[{originalFileName: vars.originalFileName, ae_tracking: vars.adapterTrackingId, fileType: 'ContingentWorker'}]"/>
+    <set-payload value="#[{originalFileName: vars.originalFileName, ae_tracking: vars.adapterTrackingId, fileType: 'ContingentWorker'}]" mimeType="application/java"/>
+    <vm:publish config-ref="VM_Config" queueName="${vm.queue.file-sequencer}"/>
   </sub-flow>
-  <flow name="HRSystemSealAndCores-Workday_root\SEAL\HRSystem\InterfaceImpl\_AllInstances\FromWorkday\_GenericFilePoller\JmsFilePoller.process"><jms:listener config-ref="JMS" destination="${jms.queue.file-sequencer}" destinationType="QUEUE"/><flow-ref name="dispatch-workday-file"/></flow>
-  <flow name="HRSystemSealAndCores-Workday_root\SEAL\HRSystem\InterfaceImpl\_AllInstances\FromWorkday\_GenericFilePoller\JmsPriorityFilePoller.process"><jms:listener config-ref="JMS" destination="${jms.queue.priority-file-sequencer}" destinationType="QUEUE"/><flow-ref name="dispatch-workday-file"/></flow>
+  <flow name="HRSystemSealAndCores-Workday_root\SEAL\HRSystem\InterfaceImpl\_AllInstances\FromWorkday\_GenericFilePoller\JmsFilePoller.process"><vm:listener config-ref="VM_Config" queueName="${vm.queue.file-sequencer}"/><flow-ref name="dispatch-workday-file"/></flow>
+  <flow name="HRSystemSealAndCores-Workday_root\SEAL\HRSystem\InterfaceImpl\_AllInstances\FromWorkday\_GenericFilePoller\JmsPriorityFilePoller.process"><vm:listener config-ref="VM_Config" queueName="${vm.queue.priority-file-sequencer}"/><flow-ref name="dispatch-workday-file"/></flow>
   <sub-flow name="dispatch-workday-file">
-    <set-variable variableName="originalFileName" value="#[(attributes.properties.originalFileName default 'unknown.xml') as String]"/><set-variable variableName="adapterTrackingId" value="#[(attributes.properties.ae_tracking default correlationId) as String]"/>
+    <set-variable variableName="originalFileName" value="#[(payload.originalFileName default 'unknown.xml') as String]"/><set-variable variableName="adapterTrackingId" value="#[(payload.ae_tracking default correlationId) as String]"/>
     <try><file:read config-ref="Working_File" path="#['${workday.working.directory}/' ++ vars.originalFileName]"/><http:request config-ref="Process_API" method="POST" path="${process.api.path}"><http:headers>#[{'x-original-file-name': vars.originalFileName, 'x-adapter-tracking-id': vars.adapterTrackingId}]</http:headers></http:request><file:move config-ref="Working_File" sourcePath="#['${workday.working.directory}/' ++ vars.originalFileName]" targetPath="#['${workday.processed.directory}/' ++ vars.originalFileName ++ '-' ++ (now() as String {format: 'yyyyMMddHHmmssSSS'})]"/><error-handler><on-error-continue type="ANY" logException="true"><logger level="ERROR" message="#['Unable to process Workday file ' ++ vars.originalFileName ++ ': ' ++ error.description]"/><file:move config-ref="Working_File" sourcePath="#['${workday.working.directory}/' ++ vars.originalFileName]" targetPath="#['${workday.error.directory}/' ++ vars.originalFileName ++ '-' ++ (now() as String {format: 'yyyyMMddHHmmssSSS'})]"/></on-error-continue></error-handler></try>
   </sub-flow>
 </mule>
