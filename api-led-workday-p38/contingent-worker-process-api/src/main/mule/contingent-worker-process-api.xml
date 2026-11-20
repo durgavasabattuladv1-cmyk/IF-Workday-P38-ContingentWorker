@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<mule xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xmlns:validation="http://www.mulesoft.org/schema/mule/validation" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd http://www.mulesoft.org/schema/mule/validation http://www.mulesoft.org/schema/mule/validation/current/mule-validation.xsd">
+<mule xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xmlns:validation="http://www.mulesoft.org/schema/mule/validation" xmlns:xml-module="http://www.mulesoft.org/schema/mule/xml-module" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd http://www.mulesoft.org/schema/mule/validation http://www.mulesoft.org/schema/mule/validation/current/mule-validation.xsd http://www.mulesoft.org/schema/mule/xml-module http://www.mulesoft.org/schema/mule/xml-module/current/mule-xml-module.xsd">
   <configuration-properties file="application.properties"/>
   <http:listener-config name="Process_API_Listener"><http:listener-connection host="${http.listener.host}" port="${http.listener.port}"/></http:listener-config>
   <http:request-config name="P38_System_API"><http:request-connection host="${p38.system.api.host}" port="${p38.system.api.port}" protocol="HTTP"/></http:request-config>
@@ -13,7 +13,7 @@
     <flow-ref name="SAPHRSealAndCores-P38_root\CORE\MrpSystemCore\EventHandlerImpl\HRSystemEvents\ContingentWorker\doAsyncCreateWorkdayContingentWorkerEvent\EventHandler.process"/>
   </flow>
   <sub-flow name="HRSystemSealAndCores-Workday_root\SEAL\HRSystem\InterfaceImpl\_AllInstances\FromWorkday\ContingentWorker\processFile.process">
-    <validation:validate-schema schemaUrl="classpath://schema/Workday_ContingentWorker.xsd"/>
+    <xml-module:validate-schema schemas="schema/Workday_ContingentWorker.xsd"/>
     <ee:transform><ee:message><ee:set-payload><![CDATA[%dw 2.0
 output application/java
 ---
