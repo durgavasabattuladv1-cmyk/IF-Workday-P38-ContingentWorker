@@ -1,17 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<mule xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xmlns:validation="http://www.mulesoft.org/schema/mule/validation" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd http://www.mulesoft.org/schema/mule/validation http://www.mulesoft.org/schema/mule/validation/current/mule-validation.xsd">
+<mule xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xmlns:validation="http://www.mulesoft.org/schema/mule/validation" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd http://www.mulesoft.org/schema/mule/validation http://www.mulesoft.org/schema/mule/validation/current/mule-validation.xsd">
   <configuration-properties file="application.properties"/>
-  <http:listener-config name="Process_API_Listener">
-    <http:listener-connection host="${http.listener.host}" port="${http.listener.port}"/>
-  </http:listener-config>
-
-  <flow name="post-contingent-workers">
-    <http:listener config-ref="Process_API_Listener" path="${http.listener.path}" allowedMethods="POST"/>
-    <set-variable variableName="originalFileName" value="#[(attributes.headers.'x-original-file-name' default 'unknown.xml') as String]"/>
-    <set-variable variableName="adapterTrackingId" value="#[(attributes.headers.'x-adapter-tracking-id' default correlationId) as String]"/>
-    <flow-ref name="HRSystemSealAndCores-Workday_root\SEAL\HRSystem\InterfaceImpl\_AllInstances\FromWorkday\ContingentWorker\processFile.process"/>
-  </flow>
-
   <sub-flow name="HRSystemSealAndCores-Workday_root\SEAL\HRSystem\InterfaceImpl\_AllInstances\FromWorkday\ContingentWorker\processFile.process">
     <validation:validate-schema schemaUrl="classpath://schema/Workday_ContingentWorker.xsd"/>
     <ee:transform><ee:message><ee:set-payload><![CDATA[%dw 2.0

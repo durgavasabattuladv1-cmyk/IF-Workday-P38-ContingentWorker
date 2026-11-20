@@ -1,57 +1,56 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<mule xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:file="http://www.mulesoft.org/schema/mule/file" xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd http://www.mulesoft.org/schema/mule/file http://www.mulesoft.org/schema/mule/file/current/mule-file.xsd http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+<mule xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:jms="http://www.mulesoft.org/schema/mule/jms" xmlns:db="http://www.mulesoft.org/schema/mule/db" xmlns:file="http://www.mulesoft.org/schema/mule/file" xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xmlns:validation="http://www.mulesoft.org/schema/mule/validation" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd http://www.mulesoft.org/schema/mule/jms http://www.mulesoft.org/schema/mule/jms/current/mule-jms.xsd http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd http://www.mulesoft.org/schema/mule/file http://www.mulesoft.org/schema/mule/file/current/mule-file.xsd http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd http://www.mulesoft.org/schema/mule/validation http://www.mulesoft.org/schema/mule/validation/current/mule-validation.xsd">
   <configuration-properties file="application.properties"/>
-  <http:listener-config name="System_API_Listener">
-    <http:listener-connection host="${http.listener.host}" port="${http.listener.port}"/>
-  </http:listener-config>
-  <http:request-config name="Contingent_Worker_Process_API">
-    <http:request-connection host="${process.api.host}" port="${process.api.port}" protocol="HTTP"/>
-  </http:request-config>
+  <jms:config name="JMS"><jms:connection><jms:active-mq-connection brokerUrl="${jms.broker.url}" username="${jms.username}" password="${jms.password}" clientId="${jms.client.id}"/></jms:connection></jms:config>
+  <db:config name="Hub_DB"><db:generic-connection url="${hub.db.url}" user="${hub.db.user}" password="${hub.db.password}" driverClassName="${hub.db.driver}"/></db:config>
   <file:config name="Inbound_File"><file:connection workingDir="${workday.inbound.directory}"/></file:config>
   <file:config name="Working_File"><file:connection workingDir="${workday.working.directory}"/></file:config>
   <file:config name="Processed_File"><file:connection workingDir="${workday.processed.directory}"/></file:config>
   <file:config name="Error_File"><file:connection workingDir="${workday.error.directory}"/></file:config>
-  <file:config name="P38_File"><file:connection workingDir="${p38.contingent-worker.output.directory}"/></file:config>
+  <file:config name="Chris_File"><file:connection workingDir="${p38.contingent-worker.output.directory}"/></file:config>
 
-  <flow name="post-contingent-workers-to-system-api">
-    <http:listener config-ref="System_API_Listener" path="${http.listener.path}" allowedMethods="POST"/>
-    <set-variable variableName="originalFileName" value="#[(attributes.headers.'x-original-file-name' default 'unknown.xml') as String]"/>
-    <set-variable variableName="adapterTrackingId" value="#[(attributes.headers.'x-adapter-tracking-id' default correlationId) as String]"/>
-    <flow-ref name="request-contingent-worker-process-api"/>
+  <!-- TIBCO FileSequencer: reserve the file in working storage, then submit it to the normal-priority queue. -->
+  <flow name="HRSystemSealAndCores-Workday_root\SEAL\HRSystem\InterfaceImpl\_AllInstances\FromWorkday\_GenericFilePoller\FileSequencer.process">
+    <file:listener config-ref="Inbound_File" directory="${workday.inbound.directory}"><scheduling-strategy><fixed-frequency frequency="${workday.polling.frequency}"/></scheduling-strategy><file:matcher filenamePattern="${workday.contingent-worker.filename-pattern}"/></file:listener>
+    <set-variable variableName="fileName" value="#[(attributes.fileName as String)]"/>
+    <set-variable variableName="adapterTrackingId" value="#[(correlationId as String)]"/>
+    <file:move config-ref="Inbound_File" sourcePath="#[vars.fileName]" targetPath="#[p('workday.working.directory') ++ '/' ++ vars.fileName]"/>
+    <jms:publish config-ref="JMS" destination="${jms.queue.file-sequencer}" destinationType="QUEUE" properties="#[{'originalFileName': vars.fileName, 'ae_tracking': vars.adapterTrackingId, 'fileType': 'ContingentWorker'}]"/>
   </flow>
 
-  <!-- Local-friendly replacement for the former FileSequencer/JMS/topic chain. -->
-  <flow name="process-contingent-worker-file">
-    <file:listener config-ref="Inbound_File" directory="${workday.inbound.directory}">
-      <scheduling-strategy><fixed-frequency frequency="${workday.polling.frequency}"/></scheduling-strategy>
-      <file:matcher filenamePattern="${workday.contingent-worker.filename-pattern}"/>
-    </file:listener>
-    <set-variable variableName="originalFileName" value="#[(attributes.fileName as String)]"/>
-    <set-variable variableName="adapterTrackingId" value="#[(correlationId as String)]"/>
-    <file:move config-ref="Inbound_File" sourcePath="#[vars.originalFileName]" targetPath="#[p('workday.working.directory') ++ '/' ++ vars.originalFileName]"/>
+  <!-- TIBCO JmsFilePoller and JmsPriorityFilePoller are queue consumers, not topic subscribers. -->
+  <flow name="HRSystemSealAndCores-Workday_root\SEAL\HRSystem\InterfaceImpl\_AllInstances\FromWorkday\_GenericFilePoller\JmsFilePoller.process"><jms:listener config-ref="JMS" destination="${jms.queue.file-sequencer}" destinationType="QUEUE"/><flow-ref name="process-queued-workday-file"/></flow>
+  <flow name="HRSystemSealAndCores-Workday_root\SEAL\HRSystem\InterfaceImpl\_AllInstances\FromWorkday\_GenericFilePoller\JmsPriorityFilePoller.process"><jms:listener config-ref="JMS" destination="${jms.queue.priority-file-sequencer}" destinationType="QUEUE"/><flow-ref name="process-queued-workday-file"/></flow>
+  <sub-flow name="process-queued-workday-file">
+    <set-variable variableName="jmsProperties" value="#[(attributes.properties default {})]"/>
+    <set-variable variableName="originalFileName" value="#[(vars.jmsProperties.originalFileName default 'unknown.xml') as String]"/>
+    <set-variable variableName="adapterTrackingId" value="#[(vars.jmsProperties.ae_tracking default correlationId) as String]"/>
     <try>
       <file:read config-ref="Working_File" path="#[vars.originalFileName]"/>
-      <flow-ref name="request-contingent-worker-process-api"/>
-      <ee:transform>
-        <ee:message><ee:set-payload><![CDATA[%dw 2.0
-output application/xml
----
-read(payload, "application/xml").Envelope.Body.Contingent_Worker_Events]]></ee:set-payload></ee:message>
-      </ee:transform>
-      <file:write config-ref="P38_File" path="#[vars.originalFileName]" mode="OVERWRITE" outputMimeType="application/xml"/>
+      <choice><when expression="#[(vars.jmsProperties.fileType default '') == 'ContingentWorker']"><jms:publish config-ref="JMS" destination="${jms.topic.amm-src}" destinationType="TOPIC" properties="#[vars.jmsProperties]"/></when><otherwise><raise-error type="WORKDAY:UNSUPPORTED_FILE_TYPE" description="#['No processor is configured for file type ' ++ (vars.jmsProperties.fileType default 'unknown')]"/></otherwise></choice>
       <file:move config-ref="Working_File" sourcePath="#[vars.originalFileName]" targetPath="#[p('workday.processed.directory') ++ '/' ++ vars.originalFileName ++ '-' ++ (now() as String {format: 'yyyyMMddHHmmssSSS'})]"/>
-      <error-handler>
-        <on-error-continue type="ANY" logException="true">
-          <logger level="ERROR" message="#['Unable to process Workday file ' ++ vars.originalFileName ++ ': ' ++ (error.description default error.errorType.identifier)]"/>
-          <file:move config-ref="Working_File" sourcePath="#[vars.originalFileName]" targetPath="#[p('workday.error.directory') ++ '/' ++ vars.originalFileName ++ '-' ++ (now() as String {format: 'yyyyMMddHHmmssSSS'})]"/>
-        </on-error-continue>
-      </error-handler>
+      <error-handler><on-error-continue type="ANY" logException="true"><logger level="ERROR" message="#['Unable to process Workday file ' ++ vars.originalFileName ++ ': ' ++ (error.description default error.errorType.identifier)]"/><file:move config-ref="Working_File" sourcePath="#[vars.originalFileName]" targetPath="#[p('workday.error.directory') ++ '/' ++ vars.originalFileName ++ '-' ++ (now() as String {format: 'yyyyMMddHHmmssSSS'})]"/></on-error-continue></error-handler>
     </try>
-  </flow>
+  </sub-flow>
 
-  <sub-flow name="request-contingent-worker-process-api">
-    <http:request config-ref="Contingent_Worker_Process_API" method="POST" path="${process.api.path}">
-      <http:headers>#[{'x-original-file-name': vars.originalFileName, 'x-adapter-tracking-id': vars.adapterTrackingId}]</http:headers>
-    </http:request>
+  <flow name="Roche.Pharma.CrossDomain.OP.Workday.ContingentWorker.AMM-SRC.Create.Publication"><jms:listener config-ref="JMS" destination="${jms.topic.amm-src}" destinationType="TOPIC"/><set-variable variableName="jmsProperties" value="#[(attributes.properties default {})]"/><set-variable variableName="originalFileName" value="#[(vars.jmsProperties.originalFileName default 'unknown.xml') as String]"/><set-variable variableName="adapterTrackingId" value="#[(vars.jmsProperties.ae_tracking default correlationId) as String]"/><flow-ref name="HRSystemSealAndCores-Workday_root\SEAL\HRSystem\InterfaceImpl\_AllInstances\FromWorkday\ContingentWorker\processFile.process"/></flow>
+  <flow name="HRSystemSealAndCores-Workday_root\CORE\HRSystemCore\EventHandlerImpl\HRSystemEvents\ContingentWorker\notifyCreateWorkdayContingentWorkerEvent\EventHandler.process"><jms:listener config-ref="JMS" destination="${jms.topic.cmm-src}" destinationType="TOPIC"/><jms:publish config-ref="JMS" destination="${jms.topic.cmm-pub}" destinationType="TOPIC" properties="#[(attributes.properties default {})]"/></flow>
+  <flow name="SAPHRSealAndCores-P38_root\CORE\MrpSystemCore\EventHandlerImpl\HRSystemEvents\ContingentWorker\doAsyncCreateWorkdayContingentWorkerEvent\EventHandler.process"><jms:listener config-ref="JMS" destination="${jms.topic.cmm-pub}" destinationType="TOPIC"/><jms:publish config-ref="JMS" destination="${jms.topic.cmm-dst}" destinationType="TOPIC" properties="#[(attributes.properties default {})]"/></flow>
+  <flow name="SAPHRSealAndCores-P38_root\SEAL\Sap\InterfaceImpl\_AllInstances\ToSap\ContingentWorker\doAsyncCreateWorkdayContingentWorkerEvent\EventHandler.process"><jms:listener config-ref="JMS" destination="${jms.topic.cmm-dst}" destinationType="TOPIC"/><set-variable variableName="fileName" value="#[(attributes.properties.originalFileName default ('DEFAULT_FILE_NAME_' ++ (now() as String {format: 'yyyyMMddHHmmssSSS'}) ++ '.xml')) as String]"/><ee:transform><ee:message><ee:set-payload resource="classpath://dwl/extract-contingent-worker-body.dwl"/></ee:message></ee:transform><file:write config-ref="Chris_File" path="#[vars.fileName]" mode="OVERWRITE" outputMimeType="application/xml"/></flow>
+
+  <!-- TIBCO ContingentWorker/processFile + mapper.process. -->
+  <sub-flow name="HRSystemSealAndCores-Workday_root\SEAL\HRSystem\InterfaceImpl\_AllInstances\FromWorkday\ContingentWorker\processFile.process">
+    <validation:validate-schema schemaUrl="classpath://schema/Workday_ContingentWorker.xsd"/>
+    <ee:transform><ee:message><ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+read(payload, "application/xml")]]></ee:set-payload></ee:message></ee:transform>
+    <validation:is-true expression="#[(payload.Contingent_Worker_Events.Worker default []) sizeOf > 0]" message="Unable to parse file from Workday because it contains no Contingent Worker data"/>
+    <ee:transform><ee:message><ee:set-payload resource="classpath://dwl/flatten-contingent-worker-events.dwl"/></ee:message></ee:transform><set-variable variableName="mappedEvents" value="#[]"/>
+    <foreach collection="#[payload]">
+      <choice><when expression="#[((payload.event.Position_Data.Cost_Center_ODG_Code default '') as String) matches /^[0-9]+$/]"><db:select config-ref="Hub_DB" target="personnelRows"><db:sql><![CDATA[SELECT personnel_area AS PERSONNEL_AREA, personnel_sub_area AS PERSONNEL_SUB_AREA FROM ${hub.location.mapping.table} WHERE UPPER(location_id)=UPPER(:locationId) AND UPPER(company_code)=UPPER(:companyCode) AND UPPER(odg_code)=UPPER(:costCenterOdg)]]></db:sql><db:input-parameters>#[{locationId: payload.event.Position_Data.Location_ID default null, companyCode: payload.event.Position_Data.Company_Code default null, costCenterOdg: payload.event.Position_Data.Cost_Center_ODG_Code default null}]</db:input-parameters></db:select></when><otherwise><db:select config-ref="Hub_DB" target="personnelRows"><db:sql><![CDATA[SELECT personnel_area AS PERSONNEL_AREA, personnel_sub_area AS PERSONNEL_SUB_AREA FROM ${hub.location.mapping.table} WHERE UPPER(location_id)=UPPER(:locationId) AND UPPER(company_code)=UPPER(:companyCode) AND UPPER(odg_name)=UPPER(:costCenterOdg)]]></db:sql><db:input-parameters>#[{locationId: payload.event.Position_Data.Location_ID default null, companyCode: payload.event.Position_Data.Company_Code default null, costCenterOdg: payload.event.Position_Data.Cost_Center_ODG_Code default null}]</db:input-parameters></db:select></otherwise></choice>
+      <db:select config-ref="Hub_DB" target="cityRows"><db:sql><![CDATA[SELECT ZCITY_KEY FROM ${hub.location.mapping.table} WHERE LOCATION_ID=:locationId]]></db:sql><db:input-parameters>#[{locationId: payload.event.Position_Data.Location_ID default null}]</db:input-parameters></db:select><ee:transform><ee:message><ee:set-payload resource="classpath://dwl/enrich-contingent-worker-event.dwl"/></ee:message></ee:transform><set-variable variableName="mappedEvents" value="#[vars.mappedEvents ++ [payload]]"/>
+    </foreach>
+    <ee:transform><ee:message><ee:set-payload resource="classpath://dwl/build-contingent-worker-events.dwl"/></ee:message></ee:transform><ee:transform><ee:message><ee:set-payload resource="classpath://dwl/wrap-canonical-envelope.dwl"/></ee:message></ee:transform><jms:publish config-ref="JMS" destination="${jms.topic.cmm-src}" destinationType="TOPIC" properties="#[{'originalFileName': vars.originalFileName, 'ae_tracking': vars.adapterTrackingId}]"/>
   </sub-flow>
 </mule>
