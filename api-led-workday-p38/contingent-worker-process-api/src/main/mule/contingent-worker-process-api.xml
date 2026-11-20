@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xmlns:validation="http://www.mulesoft.org/schema/mule/validation" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd http://www.mulesoft.org/schema/mule/validation http://www.mulesoft.org/schema/mule/validation/current/mule-validation.xsd">
+  <configuration-properties file="application.properties"/>
+  <http:listener-config name="Process_API_Listener"><http:listener-connection host="${http.listener.host}" port="${http.listener.port}"/></http:listener-config>
+  <http:request-config name="P38_System_API"><http:request-connection host="${p38.system.api.host}" port="${p38.system.api.port}" protocol="HTTP"/></http:request-config>
+
+  <flow name="Roche.Pharma.CrossDomain.OP.Workday.ContingentWorker.AMM-SRC.Create.Publication">
+    <http:listener config-ref="Process_API_Listener" path="${http.listener.path}" allowedMethods="POST"/>
+    <set-variable variableName="originalFileName" value="#[(attributes.headers.'x-original-file-name' default 'unknown.xml') as String]"/><set-variable variableName="adapterTrackingId" value="#[(attributes.headers.'x-adapter-tracking-id' default correlationId) as String]"/>
+    <flow-ref name="HRSystemSealAndCores-Workday_root\SEAL\HRSystem\InterfaceImpl\_AllInstances\FromWorkday\ContingentWorker\processFile.process"/>
+    <flow-ref name="Roche.Pharma.CrossDomain.OP.Workday.ContingentWorker.CMM-SRC.Create.Publication"/>
+    <flow-ref name="HRSystemSealAndCores-Workday_root\CORE\HRSystemCore\EventHandlerImpl\HRSystemEvents\ContingentWorker\notifyCreateWorkdayContingentWorkerEvent\EventHandler.process"/>
+    <flow-ref name="SAPHRSealAndCores-P38_root\CORE\MrpSystemCore\EventHandlerImpl\HRSystemEvents\ContingentWorker\doAsyncCreateWorkdayContingentWorkerEvent\EventHandler.process"/>
+  </flow>
+  <sub-flow name="HRSystemSealAndCores-Workday_root\SEAL\HRSystem\InterfaceImpl\_AllInstances\FromWorkday\ContingentWorker\processFile.process">
+    <validation:validate-schema schemaUrl="classpath://schema/Workday_ContingentWorker.xsd"/>
+    <ee:transform><ee:message><ee:set-payload><![CDATA[%dw 2.0
+output application/java
+---
+read(payload, "application/xml")]]></ee:set-payload></ee:message></ee:transform>
+    <validation:is-true expression="#[(payload.Contingent_Worker_Events.Worker default []) sizeOf > 0]" message="Unable to parse file from Workday because it contains no Contingent Worker data"/>
+    <ee:transform><ee:message><ee:set-payload resource="classpath://dwl/flatten-contingent-worker-events.dwl"/></ee:message></ee:transform><set-variable variableName="mappedEvents" value="#[[]]"/>
+    <foreach collection="#[payload]"><set-variable variableName="sourceEvent" value="#[payload]"/><ee:transform><ee:message><ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ locationId: vars.sourceEvent.event.Position_Data.Location_ID default null, companyCode: vars.sourceEvent.event.Position_Data.Company_Code default null, costCenterOdg: vars.sourceEvent.event.Position_Data.Cost_Center_ODG_Code default null }]]></ee:set-payload></ee:message></ee:transform><http:request config-ref="P38_System_API" method="POST" path="${p38.system.api.location-path}" target="locationMapping"/><set-payload value="#[vars.sourceEvent]"/><ee:transform><ee:message><ee:set-payload><![CDATA[%dw 2.0
+output application/java
+var source = payload
+var lookup = vars.locationMapping default {}
+---
+{ employeeId: source.employeeId, event: source.event ++ { Contact_Data: (source.event.Contact_Data default {}) ++ { (Personnel_Area: lookup.personnelArea) if lookup.personnelArea? and lookup.personnelArea != null, (Personnel_Subarea: lookup.personnelSubarea) if lookup.personnelSubarea? and lookup.personnelSubarea != null, (Working_City: lookup.cityKey) if lookup.cityKey? and lookup.cityKey != null } } }]]></ee:set-payload></ee:message></ee:transform><set-variable variableName="mappedEvents" value="#[vars.mappedEvents ++ [payload]]"/></foreach>
+    <ee:transform><ee:message><ee:set-payload resource="classpath://dwl/build-contingent-worker-events.dwl"/></ee:message></ee:transform><ee:transform><ee:message><ee:set-payload resource="classpath://dwl/wrap-canonical-envelope.dwl"/></ee:message></ee:transform>
+  </sub-flow>
+  <sub-flow name="Roche.Pharma.CrossDomain.OP.Workday.ContingentWorker.CMM-SRC.Create.Publication"><logger level="INFO" message="CMM-SRC Contingent Worker publication created for #[vars.originalFileName]"/></sub-flow>
+  <sub-flow name="HRSystemSealAndCores-Workday_root\CORE\HRSystemCore\EventHandlerImpl\HRSystemEvents\ContingentWorker\notifyCreateWorkdayContingentWorkerEvent\EventHandler.process"><logger level="INFO" message="CMM Contingent Worker core publication created"/></sub-flow>
+  <sub-flow name="SAPHRSealAndCores-P38_root\CORE\MrpSystemCore\EventHandlerImpl\HRSystemEvents\ContingentWorker\doAsyncCreateWorkdayContingentWorkerEvent\EventHandler.process"><http:request config-ref="P38_System_API" method="POST" path="${p38.system.api.file-path}"><http:headers>#[{'x-original-file-name': vars.originalFileName, 'x-adapter-tracking-id': vars.adapterTrackingId}]</http:headers></http:request></sub-flow>
+</mule>

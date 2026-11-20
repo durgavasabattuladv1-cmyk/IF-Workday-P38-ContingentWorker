@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:file="http://www.mulesoft.org/schema/mule/file" xmlns:db="http://www.mulesoft.org/schema/mule/db" xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd http://www.mulesoft.org/schema/mule/file http://www.mulesoft.org/schema/mule/file/current/mule-file.xsd http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+  <configuration-properties file="application.properties"/>
+  <http:listener-config name="P38_System_API_Listener"><http:listener-connection host="${http.listener.host}" port="${http.listener.port}"/></http:listener-config>
+  <file:config name="Chris_File"><file:connection workingDir="${p38.contingent-worker.output.directory}"/></file:config>
+  <db:config name="Hub_DB"><db:generic-connection url="${hub.db.url}" user="${hub.db.user}" password="${hub.db.password}" driverClassName="${hub.db.driver}"/></db:config>
+
+  <flow name="get-contingent-worker-location-mapping">
+    <http:listener config-ref="P38_System_API_Listener" path="/api/v1/location-mappings" allowedMethods="POST"/>
+    <choice><when expression="#[p('hub.disabled') == 'true']"><set-payload value="#[{personnelArea: null, personnelSubarea: null, cityKey: null}]" mimeType="application/json"/></when><otherwise><set-variable variableName="lookup" value="#[payload]"/><choice><when expression="#[((vars.lookup.costCenterOdg default '') as String) matches /^[0-9]+$/]"><db:select config-ref="Hub_DB" target="personnelRows"><db:sql><![CDATA[SELECT personnel_area AS PERSONNEL_AREA, personnel_sub_area AS PERSONNEL_SUBAREA FROM ${hub.location.mapping.table} WHERE UPPER(location_id)=UPPER(:locationId) AND UPPER(company_code)=UPPER(:companyCode) AND UPPER(odg_code)=UPPER(:costCenterOdg)]]></db:sql><db:input-parameters>#[vars.lookup]</db:input-parameters></db:select></when><otherwise><db:select config-ref="Hub_DB" target="personnelRows"><db:sql><![CDATA[SELECT personnel_area AS PERSONNEL_AREA, personnel_sub_area AS PERSONNEL_SUBAREA FROM ${hub.location.mapping.table} WHERE UPPER(location_id)=UPPER(:locationId) AND UPPER(company_code)=UPPER(:companyCode) AND UPPER(odg_name)=UPPER(:costCenterOdg)]]></db:sql><db:input-parameters>#[vars.lookup]</db:input-parameters></db:select></otherwise></choice><db:select config-ref="Hub_DB" target="cityRows"><db:sql><![CDATA[SELECT ZCITY_KEY FROM ${hub.location.mapping.table} WHERE LOCATION_ID=:locationId]]></db:sql><db:input-parameters>#[vars.lookup]</db:input-parameters></db:select><ee:transform><ee:message><ee:set-payload><![CDATA[%dw 2.0
+output application/json
+var personnel = (vars.personnelRows default [])[0] default {}
+var city = (vars.cityRows default [])[0] default {}
+---
+{ personnelArea: personnel.PERSONNEL_AREA default null, personnelSubarea: personnel.PERSONNEL_SUBAREA default null, cityKey: city.ZCITY_KEY default null }]]></ee:set-payload></ee:message></ee:transform></otherwise></choice>
+  </flow>
+  <flow name="SAPHRSealAndCores-P38_root\SEAL\Sap\InterfaceImpl\_AllInstances\ToSap\ContingentWorker\doAsyncCreateWorkdayContingentWorkerEvent\EventHandler.process">
+    <http:listener config-ref="P38_System_API_Listener" path="/api/v1/contingent-worker-files" allowedMethods="POST"/>
+    <set-variable variableName="outputFileName" value="#[(attributes.headers.'x-original-file-name' default ('DEFAULT_FILE_NAME_' ++ (now() as String {format: 'yyyyMMddHHmmssSSS'}) ++ '.xml')) as String]"/>
+    <ee:transform><ee:message><ee:set-payload resource="classpath://dwl/extract-contingent-worker-body.dwl"/></ee:message></ee:transform><file:write config-ref="Chris_File" path="#[vars.outputFileName]" mode="OVERWRITE" outputMimeType="application/xml"/>
+    <set-payload value="#[{status: 'written', fileName: vars.outputFileName}]" mimeType="application/json"/>
+  </flow>
+</mule>
