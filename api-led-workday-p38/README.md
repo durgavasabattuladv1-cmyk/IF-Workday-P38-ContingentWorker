@@ -6,7 +6,7 @@ This migration separates the requested TIBCO path into deployable Mule 4 APIs:
 | --- | --- | --- |
 | System API | `workday-contingent-worker-system-api` | File lifecycle and FileSequencer/VM polling; invokes the Process API with the raw Workday XML. |
 | Process API | `contingent-worker-process-api` | Validates, enriches and maps Workday Contingent Worker data into the canonical CMM SOAP envelope. |
-| System API | `p38-contingent-worker-system-api` | Owns HUB location lookups and creates the P38/CHRIS file. |
+| System API | `p38-contingent-worker-sys` | Owns HUB location lookups and creates the P38/CHRIS file. |
 
 The legacy publication names are retained as Mule flow names and trace points: `FileSequencer.AMM-SRC.ProcessFile`, `AMM-SRC`, `CMM-SRC`, `CMM`, and `CMM-DST`. HTTP is the API-to-API contract; Mule VM queues are used inside the Workday System API for local file-poller testing.
 
@@ -25,10 +25,10 @@ The two Core event-handler path names are retained as Process API subflows, whil
 
 ## Deployment order
 
-1. Deploy `p38-contingent-worker-system-api`.
+1. Deploy `p38-contingent-worker-sys`.
 2. Deploy `contingent-worker-process-api`, configured with the P38 System API URL.
-3. Deploy `workday-contingent-worker-system-api`, configured with the Process API URL and file/broker settings.
+3. Deploy `workday-contingent-worker-system-api`, configured with the Process API URL, file locations, and VM queue settings.
 
-All values are placeholders. Supply secure broker, database and endpoint configuration per environment. The Oracle JDBC driver is intentionally not bundled; use the approved enterprise repository/runtime configuration.
+All values are placeholders. Supply secure database and endpoint configuration per environment. The Oracle JDBC driver is intentionally not bundled; use the approved enterprise repository/runtime configuration.
 
-The target API-led design is described in [the API-led understanding document](../docs/api-led-workday-contingent-worker-understanding.md). The detailed TIBCO source analysis and behaviour rationale are in [the source-trace document](../docs/workday-contingent-worker-to-p38-understanding.md).
+For a point-by-point explanation of every Mule application and flow, read [the MuleSoft API flow guide](../docs/mulesoft-api-flow-guide.md). The target API-led design is described in [the API-led understanding document](../docs/api-led-workday-contingent-worker-understanding.md). The detailed TIBCO source analysis and behaviour rationale are in [the source-trace document](../docs/workday-contingent-worker-to-p38-understanding.md).

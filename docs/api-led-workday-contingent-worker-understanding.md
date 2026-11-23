@@ -109,7 +109,7 @@ The P38 System API deliberately retains the legacy output behaviour: it writes U
 
 Deploy in this order:
 
-1. `p38-contingent-worker-system-api`
+1. `p38-contingent-worker-sys`
 2. `contingent-worker-process-api`
 3. `workday-contingent-worker-system-api`
 
