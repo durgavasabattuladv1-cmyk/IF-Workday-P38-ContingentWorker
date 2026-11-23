@@ -9,37 +9,49 @@
     <http:listener config-ref="P38_System_API_Listener" path="/api/v1/location-mappings" allowedMethods="POST"/>
     <choice>
       <when expression="#[p('hub.disabled') == 'true']">
-        <set-payload value="#[{personnelArea: null, personnelSubarea: null, cityKey: null}]" mimeType="application/json"/>
+        <flow-ref name="return-empty-location-mapping"/>
       </when>
       <otherwise>
-        <set-variable variableName="lookup" value="#[payload]"/>
-        <choice>
-          <when expression="#[((vars.lookup.costCenterOdg default '') as String) matches /^[0-9]+$/]">
-            <db:select config-ref="Hub_DB" target="personnelRows">
-              <db:sql><![CDATA[SELECT personnel_area AS PERSONNEL_AREA, personnel_sub_area AS PERSONNEL_SUBAREA FROM ${hub.location.mapping.table} WHERE UPPER(location_id)=UPPER(:locationId) AND UPPER(company_code)=UPPER(:companyCode) AND UPPER(odg_code)=UPPER(:costCenterOdg)]]></db:sql>
-              <db:input-parameters><![CDATA[#[vars.lookup]]]></db:input-parameters>
-            </db:select>
-          </when>
-          <otherwise>
-            <db:select config-ref="Hub_DB" target="personnelRows">
-              <db:sql><![CDATA[SELECT personnel_area AS PERSONNEL_AREA, personnel_sub_area AS PERSONNEL_SUBAREA FROM ${hub.location.mapping.table} WHERE UPPER(location_id)=UPPER(:locationId) AND UPPER(company_code)=UPPER(:companyCode) AND UPPER(odg_name)=UPPER(:costCenterOdg)]]></db:sql>
-              <db:input-parameters><![CDATA[#[vars.lookup]]]></db:input-parameters>
-            </db:select>
-          </otherwise>
-        </choice>
-        <db:select config-ref="Hub_DB" target="cityRows">
-          <db:sql><![CDATA[SELECT ZCITY_KEY FROM ${hub.location.mapping.table} WHERE LOCATION_ID=:locationId]]></db:sql>
-          <db:input-parameters><![CDATA[#[vars.lookup]]]></db:input-parameters>
-        </db:select>
-        <ee:transform><ee:message><ee:set-payload><![CDATA[%dw 2.0
+        <flow-ref name="lookup-contingent-worker-location-mapping"/>
+      </otherwise>
+    </choice>
+  </flow>
+  <sub-flow name="return-empty-location-mapping">
+    <set-payload value="#[{personnelArea: null, personnelSubarea: null, cityKey: null}]" mimeType="application/json"/>
+  </sub-flow>
+  <sub-flow name="lookup-contingent-worker-location-mapping">
+    <set-variable variableName="lookup" value="#[payload]"/>
+    <choice>
+      <when expression="#[((vars.lookup.costCenterOdg default '') as String) matches /^[0-9]+$/]">
+        <flow-ref name="lookup-personnel-by-odg-code"/>
+      </when>
+      <otherwise>
+        <flow-ref name="lookup-personnel-by-odg-name"/>
+      </otherwise>
+    </choice>
+    <db:select config-ref="Hub_DB" target="cityRows">
+      <db:sql><![CDATA[SELECT ZCITY_KEY FROM ${hub.location.mapping.table} WHERE LOCATION_ID=:locationId]]></db:sql>
+      <db:input-parameters><![CDATA[#[vars.lookup]]]></db:input-parameters>
+    </db:select>
+    <ee:transform><ee:message><ee:set-payload><![CDATA[%dw 2.0
 output application/json
 var personnel = (vars.personnelRows default [])[0] default {}
 var city = (vars.cityRows default [])[0] default {}
 ---
 { personnelArea: personnel.PERSONNEL_AREA default null, personnelSubarea: personnel.PERSONNEL_SUBAREA default null, cityKey: city.ZCITY_KEY default null }]]></ee:set-payload></ee:message></ee:transform>
-      </otherwise>
-    </choice>
-  </flow>
+  </sub-flow>
+  <sub-flow name="lookup-personnel-by-odg-code">
+    <db:select config-ref="Hub_DB" target="personnelRows">
+      <db:sql><![CDATA[SELECT personnel_area AS PERSONNEL_AREA, personnel_sub_area AS PERSONNEL_SUBAREA FROM ${hub.location.mapping.table} WHERE UPPER(location_id)=UPPER(:locationId) AND UPPER(company_code)=UPPER(:companyCode) AND UPPER(odg_code)=UPPER(:costCenterOdg)]]></db:sql>
+      <db:input-parameters><![CDATA[#[vars.lookup]]]></db:input-parameters>
+    </db:select>
+  </sub-flow>
+  <sub-flow name="lookup-personnel-by-odg-name">
+    <db:select config-ref="Hub_DB" target="personnelRows">
+      <db:sql><![CDATA[SELECT personnel_area AS PERSONNEL_AREA, personnel_sub_area AS PERSONNEL_SUBAREA FROM ${hub.location.mapping.table} WHERE UPPER(location_id)=UPPER(:locationId) AND UPPER(company_code)=UPPER(:companyCode) AND UPPER(odg_name)=UPPER(:costCenterOdg)]]></db:sql>
+      <db:input-parameters><![CDATA[#[vars.lookup]]]></db:input-parameters>
+    </db:select>
+  </sub-flow>
   <flow name="SAPHRSealAndCores-P38_root\SEAL\Sap\InterfaceImpl\_AllInstances\ToSap\ContingentWorker\doAsyncCreateWorkdayContingentWorkerEvent\EventHandler.process">
     <http:listener config-ref="P38_System_API_Listener" path="/api/v1/contingent-worker-files" allowedMethods="POST"/>
     <set-variable variableName="outputFileName" value="#[(attributes.headers.'x-original-file-name' default ('DEFAULT_FILE_NAME_' ++ (now() as String {format: 'yyyyMMddHHmmssSSS'}) ++ '.xml')) as String]"/>
