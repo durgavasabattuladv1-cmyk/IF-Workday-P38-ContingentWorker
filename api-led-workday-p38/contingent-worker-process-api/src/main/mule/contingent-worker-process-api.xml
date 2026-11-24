@@ -19,7 +19,7 @@ output application/java
 ---
 read(payload, "application/xml")]]></ee:set-payload></ee:message></ee:transform>
     <validation:is-true expression="#[(payload.Contingent_Worker_Events.Worker default []) sizeOf > 0]" message="Unable to parse file from Workday because it contains no Contingent Worker data"/>
-    <ee:transform><ee:message><ee:set-payload resource="classpath://dwl/flatten-contingent-worker-events.dwl"/></ee:message></ee:transform><set-variable variableName="mappedEvents" value="#[[]]"/>
+    <ee:transform><ee:message><ee:set-payload resource="classpath:dwl/flatten-contingent-worker-events.dwl"/></ee:message></ee:transform><set-variable variableName="mappedEvents" value="#[[]]"/>
     <foreach collection="#[payload]"><set-variable variableName="sourceEvent" value="#[payload]"/><ee:transform><ee:message><ee:set-payload><![CDATA[%dw 2.0
 output application/json
 ---
@@ -29,7 +29,7 @@ var source = payload
 var lookup = vars.locationMapping default {}
 ---
 { employeeId: source.employeeId, event: source.event ++ { Contact_Data: (source.event.Contact_Data default {}) ++ { (Personnel_Area: lookup.personnelArea) if lookup.personnelArea? and lookup.personnelArea != null, (Personnel_Subarea: lookup.personnelSubarea) if lookup.personnelSubarea? and lookup.personnelSubarea != null, (Working_City: lookup.cityKey) if lookup.cityKey? and lookup.cityKey != null } } }]]></ee:set-payload></ee:message></ee:transform><set-variable variableName="mappedEvents" value="#[vars.mappedEvents ++ [payload]]"/></foreach>
-    <ee:transform><ee:message><ee:set-payload resource="classpath://dwl/build-contingent-worker-events.dwl"/></ee:message></ee:transform><ee:transform><ee:message><ee:set-payload resource="classpath://dwl/wrap-canonical-envelope.dwl"/></ee:message></ee:transform>
+    <ee:transform><ee:message><ee:set-payload resource="classpath:dwl/build-contingent-worker-events.dwl"/></ee:message></ee:transform><ee:transform><ee:message><ee:set-payload resource="classpath:dwl/wrap-canonical-envelope.dwl"/></ee:message></ee:transform>
   </sub-flow>
   <sub-flow name="Roche.Pharma.CrossDomain.OP.Workday.ContingentWorker.CMM-SRC.Create.Publication"><logger level="INFO" message="CMM-SRC Contingent Worker publication created for #[vars.originalFileName]"/></sub-flow>
   <sub-flow name="HRSystemSealAndCores-Workday_root\CORE\HRSystemCore\EventHandlerImpl\HRSystemEvents\ContingentWorker\notifyCreateWorkdayContingentWorkerEvent\EventHandler.process"><logger level="INFO" message="CMM Contingent Worker core publication created"/></sub-flow>

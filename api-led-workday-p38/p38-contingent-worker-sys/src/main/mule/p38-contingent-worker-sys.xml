@@ -55,7 +55,7 @@ var city = (vars.cityRows default [])[0] default {}
   <flow name="SAPHRSealAndCores-P38_root\SEAL\Sap\InterfaceImpl\_AllInstances\ToSap\ContingentWorker\doAsyncCreateWorkdayContingentWorkerEvent\EventHandler.process">
     <http:listener config-ref="P38_System_API_Listener" path="/api/v1/contingent-worker-files" allowedMethods="POST"/>
     <set-variable variableName="outputFileName" value="#[(attributes.headers.'x-original-file-name' default ('DEFAULT_FILE_NAME_' ++ (now() as String {format: 'yyyyMMddHHmmssSSS'}) ++ '.xml')) as String]"/>
-    <ee:transform><ee:message><ee:set-payload resource="classpath://dwl/extract-contingent-worker-body.dwl"/></ee:message></ee:transform><file:write config-ref="Chris_File" path="#[vars.outputFileName]" mode="OVERWRITE"/>
+    <ee:transform><ee:message><ee:set-payload resource="classpath:dwl/extract-contingent-worker-body.dwl"/></ee:message></ee:transform><file:write config-ref="Chris_File" path="#[vars.outputFileName]" mode="OVERWRITE"/>
     <set-payload value="#[{status: 'written', fileName: vars.outputFileName}]" mimeType="application/json"/>
   </flow>
 </mule>
