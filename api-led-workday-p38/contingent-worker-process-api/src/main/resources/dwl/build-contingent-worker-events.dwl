@@ -2,7 +2,6 @@
 output application/xml writeDeclaration=true, indent=true
 ns wd http://iip.roche.com/schemas/HRSystem/Workday/ContingentWorkerEvent
 fun present(value) = value != null and value != ""
-fun field(name, value) = {(name): value} if present(value) else {}
 fun contact(c) = {
   (wd#Legal_Last_Name: c.Legal_Last_Name) if present(c.Legal_Last_Name),
   (wd#Local_Last_Name: c.Local_Last_Name) if present(c.Local_Last_Name),
